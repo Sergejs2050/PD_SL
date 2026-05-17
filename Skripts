@@ -1,0 +1,132 @@
+import sqlite3, tkinter as tk  # Importē SQLite datubāzi un Tkinter GUI bibliotēku
+from tkinter import ttk, messagebox  # Importē tabulu widgetu un paziņojumu logus
+import hashlib  # Importē paroļu šifrēšanas bibliotēku
+
+#Datubāze
+DB = "ProjektaDarbs_DatuBaze_SergejsLoskutovs.db"  # Datubāzes faila nosaukums
+conn = sqlite3.connect(DB)  # Izveido savienojumu ar datubāzi
+cur = conn.cursor()  # Izveido SQL komandu izpildītāju (cursor)
+
+# Izveido tabulas, ja tās neeksistē
+tables = {  # Saglabā tabulu nosaukumus un to laukus vārdnīcā
+    "lietotaji": "id INTEGER PRIMARY KEY, lietotajvards TEXT UNIQUE, parole TEXT",
+    "klienti": "id INTEGER PRIMARY KEY, Vards TEXT, Uzvards TEXT, Telefons TEXT, Automodelis TEXT, VNZ TEXT",
+    "inventars": "id INTEGER PRIMARY KEY, nosaukums TEXT, daudzums INTEGER, derigums TEXT, atvershanas_datums TEXT, atvershanas_derigums TEXT",
+    "rezervacijas": "id INTEGER PRIMARY KEY, klienta_id INTEGER, datums TEXT, laiks TEXT, pakalpojums TEXT, pacelajs INTEGER"
+}
+
+for name, fields in tables.items():  # Cauriet cauri katrai tabulai vārdnīcā
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {name} ({fields})")  # Izveido tabulu, ja nav
+conn.commit()  # Saglabā izmaiņas datubāzē
+
+# Izveido admin lietotāju, ja tāda nav
+if not cur.execute("SELECT 1 FROM lietotaji WHERE lietotajvards='admin'").fetchone():  # Pārbauda vai admin eksistē
+    pw = hashlib.sha256("admin123".encode()).hexdigest()  # Šifrē paroli ar SHA256
+    cur.execute("INSERT INTO lietotaji VALUES(NULL,?,?)", ("admin", pw))  # Izveido admin ierakstu
+    conn.commit()  # Saglabā datubāzē
+
+#Reģistrācijas logs
+class Login:  # Klase, kas veido login logu
+    def __init__(self, root):  # Inicializācijas funkcija
+        self.root = root  # Saglabā loga objektu
+        tk.Label(root, text="Lietotājvārds").pack()  # Izvada tekstu "Lietotājvārds"
+        self.u = tk.Entry(root); self.u.pack()  # Izveido ievades lauku lietotājvārdam
+        tk.Label(root, text="Parole").pack()  # Izvada tekstu "Parole"
+        self.p = tk.Entry(root, show="*"); self.p.pack()  # Izveido ievades lauku parolei (slēpta)
+        tk.Button(root, text="Login", command=self.login).pack()  # Izveido login pogu
+    def login(self):  # Funkcija, kas tiek izsaukta, nospiežot login pogu
+        user = self.u.get()  # Nolasa lietotājvārdu
+        pw = hashlib.sha256(self.p.get().encode()).hexdigest()  # Šifrē ievadīto paroli
+        ok = cur.execute("SELECT 1 FROM lietotaji WHERE lietotajvards=? AND parole=?", (user, pw)).fetchone()  # Pārbauda datubāzē
+        if ok:  # Ja lietotājs atrasts
+            self.root.destroy()  # Aizver login logu
+            app = tk.Tk()  # Izveido galveno programmas logu
+            Main(app)  # Palaid galveno klasi
+            app.mainloop()  # Sāk GUI ciklu
+        else:
+            messagebox.showerror("Kļūda", "Nepareizi dati")  # Parāda kļūdas paziņojumu
+
+#Galvenā programma
+class Main:  # Klase galvenajam programmas logam
+    def __init__(self, root):  # Inicializācija
+        self.root = root  # Saglabā logu
+        root.title("Autoserviss")  # Uzstāda loga nosaukumu
+        root.geometry("1000x700")  # Uzstāda loga izmēru
+        tabs = ttk.Notebook(root); tabs.pack(fill="both", expand=True)  # Izveido tabus
+        self.k_frame = tk.Frame(tabs); tabs.add(self.k_frame, text="Klienti")  # Klientu tabs
+        self.i_frame = tk.Frame(tabs); tabs.add(self.i_frame, text="Inventārs")  # Inventāra tabs
+        self.r_frame = tk.Frame(tabs); tabs.add(self.r_frame, text="Rezervācijas")  # Rezervāciju tabs
+        self.setup_klienti()  # Izsauc klientu sadaļas izveidi
+        self.setup_inventars()  # Izsauc inventāra sadaļas izveidi
+        self.setup_rezervacijas()  # Izsauc rezervāciju sadaļas izveidi
+
+    #Klienti
+    def setup_klienti(self):  # Funkcija klientu sadaļas izveidei
+        labels = ["Vārds", "Uzvārds", "Telefons", "Auto", "VNZ"]  # Lauku nosaukumi
+        self.c = [self._add_field(self.k_frame, l) for l in labels]  # Izveido ievades laukus
+        tk.Button(self.k_frame, text="Saglabāt", command=self.save_client).pack()  # Poga saglabāšanai
+        self.client_table = self._table(self.k_frame, ("id","v","u","t","a","vnz"))  # Izveido tabulu
+        self.load_clients()  # Ielādē klientus tabulā
+    def save_client(self):  # Funkcija klienta saglabāšanai
+        cur.execute("INSERT INTO klienti VALUES(NULL,?,?,?,?,?)",
+                    tuple(e.get() for e in self.c))  # Ievieto datus datubāzē
+        conn.commit()  # Saglabā
+        self.load_clients()  # Atjauno tabulu
+        messagebox.showinfo("OK", "Klients pievienots")  # Paziņojums
+    def load_clients(self):  # Funkcija klientu tabulas ielādei
+        self._load_table(self.client_table, "SELECT * FROM klienti")  # Ielādē visus klientus
+
+    #Inventārs
+    def setup_inventars(self):  # Inventāra sadaļas izveide
+        labels = ["Nosaukums", "Daudzums", "Derīgums", "Atv.dat", "Atv.der"]  # Lauku nosaukumi
+        self.i = [self._add_field(self.i_frame, l) for l in labels]  # Izveido ievades laukus
+        tk.Button(self.i_frame, text="Saglabāt", command=self.save_inv).pack()  # Poga saglabāšanai
+        self.inv_table = self._table(self.i_frame, ("id","n","d","dg","ad","adg"))  # Izveido tabulu
+        self.load_inv()  # Ielādē inventāru
+    def save_inv(self):  # Funkcija inventāra saglabāšanai
+        cur.execute("INSERT INTO inventars VALUES(NULL,?,?,?,?,?)",
+                    tuple(e.get() for e in self.i))  # Ievieto datus
+        conn.commit()  # Saglabā
+        self.load_inv()  # Atjauno tabulu
+        messagebox.showinfo("OK", "Inventārs pievienots")  # Paziņojums
+    def load_inv(self):  # Funkcija inventāra ielādei
+        self._load_table(self.inv_table, "SELECT * FROM inventars")  # Ielādē visus ierakstus
+
+    #Rezervācijas
+    def setup_rezervacijas(self):  # Rezervāciju sadaļas izveide
+        labels = ["Klienta ID", "Datums", "Laiks", "Pakalpojums", "Pacēlājs"]  # Lauku nosaukumi
+        self.r = [self._add_field(self.r_frame, l) for l in labels]  # Izveido ievades laukus
+        tk.Button(self.r_frame, text="Rezervēt", command=self.save_res).pack()  # Poga rezervēšanai
+        self.res_table = self._table(self.r_frame, ("id","k","d","l","p","pa"))  # Izveido tabulu
+        self.load_res()  # Ielādē rezervācijas
+    def save_res(self):  # Funkcija rezervācijas saglabāšanai
+        d, t, p = self.r[1].get(), self.r[2].get(), self.r[4].get()  # Nolasa datumu, laiku un pacēlāju
+        busy = cur.execute("SELECT 1 FROM rezervacijas WHERE datums=? AND laiks=? AND pacelajs=?", (d, t, p)).fetchone()  # Pārbauda vai aizņemts
+        if busy:  # Ja pacēlājs aizņemts
+            messagebox.showerror("Kļūda", "Pacēlājs aizņemts")  # Parāda kļūdu
+            return
+        cur.execute("INSERT INTO rezervacijas VALUES(NULL,?,?,?,?,?)",
+                    tuple(e.get() for e in self.r))  # Saglabā rezervāciju
+        conn.commit()  # Saglabā datubāzē
+        self.load_res()  # Atjauno tabulu
+        messagebox.showinfo("OK", "Rezervācija izveidota")  # Paziņojums
+    def load_res(self):  # Funkcija rezervāciju ielādei
+        self._load_table(self.res_table, "SELECT * FROM rezervacijas")  # Ielādē visus ierakstus
+
+    #Palīgfunkcijas
+    def _add_field(self, frame, text):  # Funkcija ievades lauka izveidei
+        tk.Label(frame, text=text).pack()  # Izvada lauka nosaukumu
+        e = tk.Entry(frame); e.pack()  # Izveido ievades lauku
+        return e  # Atgriež ievades lauku
+    def _table(self, frame, cols):  # Funkcija tabulas izveidei
+        t = ttk.Treeview(frame, columns=cols, show="headings")  # Izveido tabulu ar kolonnām
+        for c in cols: t.heading(c, text=c)  # Uzstāda kolonnu nosaukumus
+        t.pack(fill="both", expand=True)  # Parāda tabulu
+        return t  # Atgriež tabulu
+    def _load_table(self, table, query):  # Funkcija tabulas datu ielādei
+        for i in table.get_children(): table.delete(i)  # Notīra tabulu
+        for row in cur.execute(query): table.insert("", "end", values=row)  # Ievieto datus tabulā
+#Start
+root = tk.Tk()  # Izveido galveno logu
+Login(root)  # Palaid login logu
+root.mainloop()  # Sāk GUI ciklu
